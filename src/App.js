@@ -1,23 +1,20 @@
-import logo from './logo.svg';
-import './App.css';
+import React from "react";
+import MapView from "./components/MapView";
+import VehicleTable from "./components/VehicleTable";
+import "bootstrap/dist/css/bootstrap.min.css";
 
 function App() {
   return (
-    <div className="App">
-      <header className="App-header">
-        <img src={logo} className="App-logo" alt="logo" />
-        <p>
-          Edit <code>src/App.js</code> and save to reload.
-        </p>
-        <a
-          className="App-link"
-          href="https://reactjs.org"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          Learn React
-        </a>
-      </header>
+    <div className="container-fluid vh-100 overflow-hidden">
+      <div className="row h-100">
+        <div className="col-md-4 bg-light p-3 overflow-auto">
+          <h3 className="mb-3">Live Vehicle Locations</h3>
+          <VehicleTable />
+        </div>
+        <div className="col-md-8 p-0">
+          <MapView />
+        </div>
+      </div>
     </div>
   );
 }
