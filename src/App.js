@@ -1,21 +1,28 @@
-import React from "react";
-import MapView from "./components/MapView";
+import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-dom";
+import Login from "./components/Login";
+import Signup from "./components/Signup";
+import MapView from "./components/MapView"; // where your Leaflet map lives
 import VehicleTable from "./components/VehicleTable";
-import "bootstrap/dist/css/bootstrap.min.css";
 
 function App() {
+  const isLoggedIn = !!localStorage.getItem("token");
+
   return (
-    <div className="container-fluid vh-100 overflow-hidden">
-      <div className="row h-100">
-        <div className="col-md-4 bg-light p-3 overflow-auto">
-          <h3 className="mb-3">Live Vehicle Locations</h3>
-          <VehicleTable />
-        </div>
-        <div className="col-md-8 p-0">
-          <MapView />
-        </div>
-      </div>
-    </div>
+    <Router>
+      <Routes>
+        <Route path="/" element={<Navigate to="/login" />} />
+        <Route path="/login" element={<Login />} />
+        <Route path="/signup" element={<Signup />} />
+
+        {/* Protected routes below */}
+        {isLoggedIn && (
+          <>
+            <Route path="/map" element={<MapView />} />
+            <Route path="/vehicles" element={<VehicleTable />} />
+          </>
+        )}
+      </Routes>
+    </Router>
   );
 }
 
