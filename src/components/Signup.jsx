@@ -1,35 +1,52 @@
-import { useState } from "react";
-import { signup } from "../services/api";
+import React, { useState } from 'react';
+import { useNavigate, Link } from 'react-router-dom';
+import { signup } from '../services/api'; // adjust path if necessary
 
-function Signup() {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [role, setRole] = useState("USER"); // default role
+const Signup = () => {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [role, setRole] = useState('ADMIN');
+  const navigate = useNavigate();
 
   const handleSignup = async (e) => {
     e.preventDefault();
     try {
-      const response = await signup(email, password, role);
-      localStorage.setItem("token", response.data.token);
-      alert("Signup successful");
+      await signup(email, password, role);
+      alert('Signup successful!');
+      navigate('/login');
     } catch (err) {
-      alert(err.response?.data || "Signup failed");
+      alert('Signup failed. Try again.');
     }
   };
 
   return (
-    <form onSubmit={handleSignup}>
-      <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email" required />
-      <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Password" required />
-      
-      <select value={role} onChange={(e) => setRole(e.target.value)} required>
-        <option value="USER">User</option>
-        <option value="ADMIN">Admin</option>
-      </select>
-
-      <button type="submit">Sign Up</button>
-    </form>
+    <div className="container d-flex align-items-center justify-content-center vh-100">
+      <div className="card p-4 shadow" style={{ width: '100%', maxWidth: '400px' }}>
+        <h3 className="text-center mb-4">Sign Up</h3>
+        <form onSubmit={handleSignup}>
+          <div className="mb-3">
+            <label className="form-label">Email address</label>
+            <input type="email" className="form-control" required value={email} onChange={(e) => setEmail(e.target.value)} />
+          </div>
+          <div className="mb-3">
+            <label className="form-label">Password</label>
+            <input type="password" className="form-control" required value={password} onChange={(e) => setPassword(e.target.value)} />
+          </div>
+          <div className="mb-3">
+            <label className="form-label">Role</label>
+            <select className="form-select" value={role} onChange={(e) => setRole(e.target.value)}>
+           <option value="ADMIN">ADMIN</option>
+              
+            </select>
+          </div>
+          <button type="submit" className="btn btn-success w-100">Sign Up</button>
+        </form>
+        <p className="mt-3 text-center">
+          Already have an account? <Link to="/login">Login</Link>
+        </p>
+      </div>
+    </div>
   );
-}
+};
 
 export default Signup;
