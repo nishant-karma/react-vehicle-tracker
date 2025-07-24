@@ -10,3 +10,12 @@ export const login = (email, password) =>
 // Add role field to signup
 export const signup = (email, password, role) =>
   API.post('/signup', { email, password, role });
+
+
+export const fetchVehiclePath = (vehicleNumber, from, to) =>
+  API.get("/vehicles/path", {
+    params: { vehicleNumber, from, to },
+  });
+
+
+  export const fetchLiveVehicles = () => API.get("/vehicles/live");
