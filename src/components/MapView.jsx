@@ -1,77 +1,69 @@
-import React, { useEffect, useState } from "react";
-import {
-  MapContainer,
-  TileLayer,
-  Marker,
-  Popup,
-  Polyline,
-} from "react-leaflet";
-import L from "leaflet";
-import "leaflet/dist/leaflet.css";
-import "bootstrap/dist/css/bootstrap.min.css";
-import useVehicleWebSocket from "../hooks/useVehicleWebSocket";
+import React, { useEffect, useRef, useState } from "react";
+import Map from "ol/Map";
+import View from "ol/View";
+import { OSM } from "ol/source";
+import { Tile as TileLayer, Vector as VectorLayer } from "ol/layer";
+import { Vector as VectorSource } from "ol/source";
+import { Point, LineString } from "ol/geom";
+import { Icon, Style, Text, Fill, Stroke } from "ol/style";
+import Feature from "ol/Feature";
+import { fromLonLat } from "ol/proj";
+import Overlay from "ol/Overlay";
+import "ol/ol.css";
+import "../styles/MapView.css"; // create this for custom style if needed
+
 import { fetchVehiclePath, fetchLiveVehicles } from "../services/api";
+import useVehicleWebSocket from "../hooks/useVehicleWebSocket";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 
-
-
-// Fix Leaflet marker icons
-delete L.Icon.Default.prototype._getIconUrl;
-L.Icon.Default.mergeOptions({
-  iconRetinaUrl:
-    "https://unpkg.com/leaflet@1.7.1/dist/images/marker-icon-2x.png",
-  iconUrl: "https://unpkg.com/leaflet@1.7.1/dist/images/marker-icon.png",
-  shadowUrl: "https://unpkg.com/leaflet@1.7.1/dist/images/marker-shadow.png",
-});
-
-// Custom label icon showing vehicle number
-function createLabelIcon(vehicleNumber) {
-  return L.divIcon({
-    className: "custom-label-icon",
-    html: `
-      <div style="
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: 6px;
-        font-weight: bold;
-        font-size: 16px;
-        color: black;
-        background: transparent;
-        pointer-events: none;
-      ">
-        <span style="font-size: 26px;">🚗</span>
-        <span>${vehicleNumber || "N/A"}</span>
-      </div>
-    `,
-    iconAnchor: [30, 40], // anchor below the label to place it above marker
-  });
-}
-
 function MapView() {
+  const mapRef = useRef();
+  const mapInstance = useRef(null);
+  const vehicleLayerRef = useRef(null);
+  const pathLayerRef = useRef(null);
+
   const [vehicles, setVehicles] = useState([]);
   const [vehicleNumber, setVehicleNumber] = useState("");
   const [fromDate, setFromDate] = useState(null);
   const [toDate, setToDate] = useState(null);
-  const [polylineCoords, setPolylineCoords] = useState([]);
-  const [showAllVehicles, setShowAllVehicles] = useState(true);
+  const [showAll, setShowAll] = useState(true);
 
-  // Initial load + polling
+  // Initial Map Setup
   useEffect(() => {
-    const loadVehicles = () => {
-      fetchLiveVehicles()
-        .then((res) => setVehicles(res.data))
-        .catch((err) => console.error("Failed to fetch live vehicles:", err));
-    };
+    const baseLayer = new TileLayer({ source: new OSM() });
 
-    loadVehicles();
-    const interval = setInterval(loadVehicles, 10000); // poll every 10s
+    const vehicleSource = new VectorSource();
+    const vehicleLayer = new VectorLayer({ source: vehicleSource });
+    vehicleLayerRef.current = vehicleSource;
 
-    return () => clearInterval(interval);
+    const pathSource = new VectorSource();
+    const pathLayer = new VectorLayer({
+      source: pathSource,
+      style: new Style({
+        stroke: new Stroke({ color: "red", width: 3 }),
+      }),
+    });
+    pathLayerRef.current = pathSource;
+
+    mapInstance.current = new Map({
+      target: mapRef.current,
+      layers: [baseLayer, vehicleLayer, pathLayer],
+      view: new View({
+        center: fromLonLat([85.324, 27.7172]),
+        zoom: 14,
+      }),
+    });
   }, []);
 
-  // WebSocket updates
+  // Fetch Live Vehicles Initially
+  useEffect(() => {
+    fetchLiveVehicles()
+      .then((res) => setVehicles(res.data))
+      .catch(console.error);
+  }, []);
+
+  // Handle WebSocket Live Updates
   useVehicleWebSocket((data) => {
     setVehicles((prev) => {
       const index = prev.findIndex((v) => v.vehicleId === data.vehicleId);
@@ -84,18 +76,64 @@ function MapView() {
     });
   });
 
-  // Fetch path from backend
+  // Update vehicle markers on map
+  useEffect(() => {
+    if (!vehicleLayerRef.current) return;
+
+    vehicleLayerRef.current.clear();
+
+    const filteredVehicles = showAll
+      ? vehicles
+      : vehicles.filter((v) => v.vehicleNumber === vehicleNumber);
+
+    filteredVehicles.forEach((v) => {
+      const feature = new Feature({
+        geometry: new Point(fromLonLat([v.longitude, v.latitude])),
+      });
+
+      feature.setStyle(
+        new Style({
+          image: new Icon({
+            src: "https://cdn-icons-png.flaticon.com/512/334/334998.png", // car icon
+            scale: 0.05,
+          }),
+          text: new Text({
+            text: v.vehicleNumber,
+            font: "bold 14px Arial",
+            fill: new Fill({ color: "black" }),
+            offsetY: -25,
+            backgroundFill: new Fill({ color: "white" }),
+            padding: [2, 2, 2, 2],
+          }),
+        })
+      );
+
+      vehicleLayerRef.current.addFeature(feature);
+    });
+  }, [vehicles, showAll, vehicleNumber]);
+
+  // Handle path fetch
   const handlePathRequest = async () => {
     if (!vehicleNumber || !fromDate || !toDate) return;
-    setShowAllVehicles(false);
+    setShowAll(false);
 
-    const fromDateTime = fromDate.toISOString().split("T")[0] + "T00:00:00";
-    const toDateTime = toDate.toISOString().split("T")[0] + "T23:59:59";
+    const fromISO = fromDate.toISOString().split("T")[0] + "T00:00:00";
+    const toISO = toDate.toISOString().split("T")[0] + "T23:59:59";
 
     try {
-      const res = await fetchVehiclePath(vehicleNumber, fromDateTime, toDateTime);
-      const coords = res.data.coordinates.map((pt) => [pt.y, pt.x]);
-      setPolylineCoords(coords);
+      const res = await fetchVehiclePath(vehicleNumber, fromISO, toISO);
+
+      const coordinates = res.data.coordinates.map((pt) =>
+        fromLonLat([pt.x, pt.y])
+      );
+
+      pathLayerRef.current.clear();
+
+      const line = new Feature({
+        geometry: new LineString(coordinates),
+      });
+
+      pathLayerRef.current.addFeature(line);
     } catch (err) {
       console.error("Error fetching path:", err);
     }
@@ -103,93 +141,63 @@ function MapView() {
 
   return (
     <div className="container-fluid p-4">
-      <h3 className="text-center mb-4">🚗 Live Vehicle Tracking</h3>
+      <h3 className="text-center mb-4">🚗 Live Vehicle Tracking (OpenLayers)</h3>
 
-      {/* Filter Inputs */}
       <div className="row mb-3">
         <div className="col-md-3">
           <input
             type="text"
-            placeholder="Vehicle Number"
             className="form-control"
+            placeholder="Vehicle Number"
             value={vehicleNumber}
             onChange={(e) => setVehicleNumber(e.target.value)}
           />
         </div>
-        <div className="col-md-3 position-relative" style={{ zIndex: 1000 }}>
+        <div className="col-md-3" style={{ zIndex: 1000 }}>
           <DatePicker
             selected={fromDate}
             onChange={(date) => setFromDate(date)}
             className="form-control"
             placeholderText="From Date"
             dateFormat="yyyy-MM-dd"
-            isClearable
           />
         </div>
-        <div className="col-md-3 position-relative" style={{ zIndex: 1000 }}>
+        <div className="col-md-3" style={{ zIndex: 1000 }}>
           <DatePicker
             selected={toDate}
             onChange={(date) => setToDate(date)}
             className="form-control"
             placeholderText="To Date"
             dateFormat="yyyy-MM-dd"
-            isClearable
           />
         </div>
-
         <div className="col-md-3 d-flex gap-2">
-          <button className="btn btn-primary w-100" onClick={handlePathRequest}>
+          <button className="btn btn-primary w-50" onClick={handlePathRequest}>
             Show Path
           </button>
-          <button className="btn btn-secondary w-100" onClick={() => {
-            setShowAllVehicles(true);
-            setVehicleNumber("");
-            setPolylineCoords([]);
-          }}>
+          <button
+            className="btn btn-secondary w-50"
+            onClick={() => {
+              setShowAll(true);
+              setVehicleNumber("");
+              pathLayerRef.current?.clear();
+            }}
+          >
             Show All
           </button>
         </div>
-
       </div>
 
-      {/* Map */}
       <div className="card shadow">
-        <div className="card-body p-0" style={{ height: "80vh" }}>
-          <MapContainer
-            center={[27.7172, 85.324]}
-            zoom={15}
+        <div
+          className="card-body p-0"
+          style={{ height: "80vh", width: "100%" }}
+        >
+          <div
+            ref={mapRef}
             style={{ height: "100%", width: "100%" }}
-          >
-            <TileLayer
-              attribution='&copy; <a href="https://osm.org/copyright">OpenStreetMap</a>'
-              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-            />
-
-            {/* Render all valid markers */}
-            {vehicles
-              .filter((v) => showAllVehicles || v.vehicleNumber === vehicleNumber)
-              .map((v) => (
-                <Marker
-                  key={v.vehicleId}
-                  position={[v.latitude, v.longitude]}
-                  icon={createLabelIcon(v.vehicleNumber)}
-                >
-                  <Popup>
-                    <strong>ID:</strong> {v.vehicleId?.slice(0, 6)}...<br />
-                    <strong>Vehicle Number:</strong> {v.vehicleNumber || "N/A"}<br />
-                     <strong>Lat:</strong> {v.latitude?.toFixed(6)}<br />
-                    <strong>Lon:</strong> {v.longitude?.toFixed(6)}<br />
-                   
-
-                    <small>{new Date(v.timestamp).toLocaleString()}</small>
-                  </Popup>
-                </Marker>
-              ))}
-            {/* Vehicle Path */}
-            {polylineCoords.length > 1 && (
-              <Polyline positions={polylineCoords} color="red" />
-            )}
-          </MapContainer>
+            id="ol-map"
+          />
         </div>
       </div>
     </div>
