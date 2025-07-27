@@ -9,11 +9,30 @@ import { Icon, Style, Text, Fill, Stroke } from "ol/style";
 import Feature from "ol/Feature";
 import { fromLonLat } from "ol/proj";
 import "ol/ol.css";
+import DatePicker from "react-datepicker";
+import "react-datepicker/dist/react-datepicker.css";
 
 import { fetchVehiclePath, fetchLiveVehicles } from "../services/api";
 import useVehicleWebSocket from "../hooks/useVehicleWebSocket";
-import DatePicker from "react-datepicker";
-import "react-datepicker/dist/react-datepicker.css";
+
+function createFeatureStyle(labelText) {
+  return new Style({
+    image: new Icon({
+      src: "https://cdn-icons-png.flaticon.com/512/334/334998.png",
+      scale: 0.07,
+    }),
+    text: new Text({
+      text: labelText,
+      font: "bold 14px Arial",
+      overflow: true,
+      fill: new Fill({ color: "black" }),
+      backgroundFill: new Fill({ color: "white" }),
+      padding: [2, 2, 2, 2],
+      offsetY: -25,
+    }),
+  });
+}
+
 
 function MapView() {
   const mapRef = useRef();
@@ -27,56 +46,66 @@ function MapView() {
   const [toDate, setToDate] = useState(null);
   const [showAll, setShowAll] = useState(true);
 
-  // Initialize map once
+  const createVehicleFeatures = (vehicle) => {
+    const coord = fromLonLat([vehicle.longitude, vehicle.latitude]);
+
+    const iconFeature = new Feature(new Point(coord));
+    iconFeature.setId(`icon-${vehicle.vehicleId}`);
+    iconFeature.setStyle(
+      new Style({
+        image: new Icon({
+          src: "https://cdn-icons-png.flaticon.com/512/334/334998.png",
+          scale: 0.1,
+        }),
+      })
+    );
+
+    const labelFeature = new Feature(new Point(coord));
+    labelFeature.setId(`label-${vehicle.vehicleId}`);
+    labelFeature.setStyle(
+      new Style({
+        text: new Text({
+          text: vehicle.vehicleNumber,
+          font: "bold 14px Arial",
+          fill: new Fill({ color: "black" }),
+          backgroundFill: new Fill({ color: "white" }),
+          offsetY: -25,
+          padding: [2, 2, 2, 2],
+        }),
+      })
+    );
+
+    return [iconFeature, labelFeature];
+  };
+
   useEffect(() => {
     if (mapInstance.current) return;
 
     const baseLayer = new TileLayer({ source: new OSM() });
-
     const vehicleSource = new VectorSource();
-    const vehicleLayer = new VectorLayer({
-      source: vehicleSource,
-      declutter: true,
-    });
+    const vehicleLayer = new VectorLayer({ source: vehicleSource });
     vehicleLayerRef.current = vehicleLayer;
 
     const pathSource = new VectorSource();
     const pathLayer = new VectorLayer({
       source: pathSource,
-      style: new Style({
-        stroke: new Stroke({ color: "red", width: 3 }),
-      }),
+      style: new Style({ stroke: new Stroke({ color: "red", width: 3 }) }),
     });
     pathLayerRef.current = pathLayer;
 
     mapInstance.current = new Map({
       target: mapRef.current,
       layers: [baseLayer, vehicleLayer, pathLayer],
-      view: new View({
-        center: fromLonLat([85.324, 27.7172]),
-        zoom: 14,
-      }),
+      view: new View({ center: fromLonLat([85.324, 27.7172]), zoom: 14 }),
     });
-
-    // Add static label feature (e.g., city center label)
-    const staticLabelFeature = new Feature({
-      geometry: new Point(fromLonLat([85.324, 27.7172])),
-    });
-    staticLabelFeature.setId("static-label");
-    staticLabelFeature.setStyle(createFeatureStyle("Static Label"));
-    vehicleSource.addFeature(staticLabelFeature);
   }, []);
 
-  // Fetch vehicles initially
   useEffect(() => {
     fetchLiveVehicles()
-      .then((res) => {
-        setVehicles(res.data);
-      })
+      .then((res) => setVehicles(res.data))
       .catch(console.error);
   }, []);
 
-  // WebSocket updates
   useVehicleWebSocket((data) => {
     setVehicles((prev) => {
       const index = prev.findIndex((v) => v.vehicleId === data.vehicleId);
@@ -89,128 +118,97 @@ function MapView() {
     });
   });
 
-  // Create style for vehicle features with label
-  function createFeatureStyle(labelText) {
-    return new Style({
-      image: new Icon({
-        src: "https://cdn-icons-png.flaticon.com/512/334/334998.png",
-        scale: 0.07,
-      }),
-      text: new Text({
-        text: labelText,
-        font: "bold 14px Arial",
-        overflow: true,
-        fill: new Fill({ color: "black" }),
-        backgroundFill: new Fill({ color: "white" }),
-        padding: [2, 2, 2, 2],
-        offsetY: -25,
-      }),
-    });
-  }
-
-  // Update vehicle markers whenever vehicles or filters change
   useEffect(() => {
     if (!vehicleLayerRef.current) return;
 
     const source = vehicleLayerRef.current.getSource();
-
-    // Keep static label ID so we don't remove it
-    const staticLabelId = "static-label";
-
     const filteredVehicles = showAll
       ? vehicles
       : vehicles.filter((v) => v.vehicleNumber === vehicleNumber);
 
-    // Remove features that are not in filteredVehicles (but keep static label)
-    const filteredIds = new Set(filteredVehicles.map((v) => v.vehicleId));
-    source.getFeatures().forEach((feature) => {
-      const fid = feature.getId();
-      if (fid !== staticLabelId && !filteredIds.has(fid)) {
-        source.removeFeature(feature);
-      }
+    const newIds = new Set();
+    filteredVehicles.forEach((v) => {
+      const [iconFeature, labelFeature] = createVehicleFeatures(v);
+      newIds.add(iconFeature.getId());
+      newIds.add(labelFeature.getId());
+
+      const iconExisting = source.getFeatureById(iconFeature.getId());
+      const labelExisting = source.getFeatureById(labelFeature.getId());
+
+      if (!iconExisting) source.addFeature(iconFeature);
+      else iconExisting.setGeometry(iconFeature.getGeometry());
+
+      if (!labelExisting) source.addFeature(labelFeature);
+      else labelExisting.setGeometry(labelFeature.getGeometry());
     });
 
-    // Add or update filtered vehicles features
-    filteredVehicles.forEach((v) => {
-      let feature = source.getFeatureById(v.vehicleId);
-      const coord = fromLonLat([v.longitude, v.latitude]);
-
-      if (!feature) {
-        feature = new Feature({
-          geometry: new Point(coord),
-        });
-        feature.setId(v.vehicleId);
-        source.addFeature(feature);
-      } else {
-        feature.setGeometry(new Point(coord));
-      }
-
-      feature.setStyle(createFeatureStyle(v.vehicleNumber));
-      feature.changed();
+    source.getFeatures().forEach((f) => {
+      if (!newIds.has(f.getId())) source.removeFeature(f);
     });
   }, [vehicles, showAll, vehicleNumber]);
 
-  // Handle path fetch and display
   const handlePathRequest = async () => {
     if (!vehicleNumber || !fromDate || !toDate) return;
     setShowAll(false);
 
-    const fromISO = fromDate.toISOString().split("T")[0] + "T00:00:00";
-    const toISO = toDate.toISOString().split("T")[0] + "T23:59:59";
+    const formatDate = (date, time = "00:00:00") => {
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, "0");
+      const day = String(date.getDate()).padStart(2, "0");
+      return `${year}-${month}-${day}T${time}`;
+    };
+
+    const fromISO = formatDate(fromDate, "00:00:00");
+    const toISO = formatDate(toDate, "23:59:59");
 
     try {
       const res = await fetchVehiclePath(vehicleNumber, fromISO, toISO);
-
-      if (!res.data?.coordinates || res.data.coordinates.length < 2) {
-        alert("Path too short or empty.");
-        return;
-      }
+      if (!res.data?.coordinates?.length) return alert("No path found");
 
       const coordinates = res.data.coordinates.map((pt) =>
         fromLonLat([pt.x, pt.y])
       );
 
-      const source = pathLayerRef.current.getSource();
-      source.clear();
-
-      const line = new Feature({
-        geometry: new LineString(coordinates),
-      });
-      source.addFeature(line);
-
-      // Add vehicle icon at path end point with label
       const lastCoord = coordinates[coordinates.length - 1];
-
-      const vehicleSource = vehicleLayerRef.current.getSource();
-
-      // Clear all vehicle features except static label
-      vehicleSource
-        .getFeatures()
-        .filter((f) => f.getId() !== "static-label")
-        .forEach((f) => vehicleSource.removeFeature(f));
 
       const pathVehicleMarker = new Feature({
         geometry: new Point(lastCoord),
       });
-      pathVehicleMarker.setId("path-vehicle");
-
       pathVehicleMarker.setStyle(createFeatureStyle(vehicleNumber));
-      vehicleSource.addFeature(pathVehicleMarker);
+      pathLayerRef.current.getSource().addFeature(pathVehicleMarker);
 
-      // Zoom to fit path line
-      mapInstance.current.getView().fit(line.getGeometry().getExtent(), {
+      const source = pathLayerRef.current.getSource();
+      source.clear();
+      source.addFeature(new Feature({ geometry: new LineString(coordinates) }));
+
+      const vehicleSource = vehicleLayerRef.current.getSource();
+      vehicleSource.clear();
+
+      const [iconFeature, labelFeature] = createVehicleFeatures({
+        vehicleId: "path-end",
+        vehicleNumber,
+        longitude: res.data.coordinates.at(-1).x,
+        latitude: res.data.coordinates.at(-1).y,
+      });
+
+      vehicleSource.addFeature(iconFeature);
+      vehicleSource.addFeature(labelFeature);
+
+
+
+
+      mapInstance.current.getView().fit(source.getExtent(), {
         padding: [50, 50, 50, 50],
         duration: 500,
       });
     } catch (err) {
-      console.error("Error fetching path:", err);
+      console.error("Path fetch error:", err);
     }
   };
 
   return (
     <div className="container-fluid p-4">
       <h3 className="text-center mb-4">🚗 Live Vehicle Tracking (OpenLayers)</h3>
-
       <div className="row mb-3">
         <div className="col-md-3">
           <input
@@ -257,15 +255,8 @@ function MapView() {
       </div>
 
       <div className="card shadow">
-        <div
-          className="card-body p-0"
-          style={{ height: "80vh", width: "100%" }}
-        >
-          <div
-            ref={mapRef}
-            style={{ height: "100%", width: "100%" }}
-            id="ol-map"
-          />
+        <div className="card-body p-0" style={{ height: "80vh" }}>
+          <div ref={mapRef} style={{ height: "100%", width: "100%" }} />
         </div>
       </div>
     </div>
