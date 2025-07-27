@@ -89,8 +89,15 @@ function MapView() {
     if (!vehicleNumber || !fromDate || !toDate) return;
     setShowAllVehicles(false);
 
-    const fromDateTime = fromDate.toISOString().split("T")[0] + "T00:00:00";
-    const toDateTime = toDate.toISOString().split("T")[0] + "T23:59:59";
+    const formatDate = (date, time = "00:00:00") => {
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, "0"); // Months are 0-based
+      const day = String(date.getDate()).padStart(2, "0");
+      return `${year}-${month}-${day}T${time}`;
+    };
+
+    const fromDateTime = formatDate(fromDate, "00:00:00");
+    const toDateTime = formatDate(toDate, "23:59:59");
 
     try {
       const res = await fetchVehiclePath(vehicleNumber, fromDateTime, toDateTime);
@@ -177,9 +184,9 @@ function MapView() {
                   <Popup>
                     <strong>ID:</strong> {v.vehicleId?.slice(0, 6)}...<br />
                     <strong>Vehicle Number:</strong> {v.vehicleNumber || "N/A"}<br />
-                     <strong>Lat:</strong> {v.latitude?.toFixed(6)}<br />
+                    <strong>Lat:</strong> {v.latitude?.toFixed(6)}<br />
                     <strong>Lon:</strong> {v.longitude?.toFixed(6)}<br />
-                   
+
 
                     <small>{new Date(v.timestamp).toLocaleString()}</small>
                   </Popup>
