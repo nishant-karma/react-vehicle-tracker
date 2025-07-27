@@ -8,9 +8,7 @@ import { Point, LineString } from "ol/geom";
 import { Icon, Style, Text, Fill, Stroke } from "ol/style";
 import Feature from "ol/Feature";
 import { fromLonLat } from "ol/proj";
-import Overlay from "ol/Overlay";
 import "ol/ol.css";
-import "../styles/MapView.css"; // create this for custom style if needed
 
 import { fetchVehiclePath, fetchLiveVehicles } from "../services/api";
 import useVehicleWebSocket from "../hooks/useVehicleWebSocket";
@@ -29,13 +27,18 @@ function MapView() {
   const [toDate, setToDate] = useState(null);
   const [showAll, setShowAll] = useState(true);
 
-  // Initial Map Setup
+  // Initialize map once
   useEffect(() => {
+    if (mapInstance.current) return;
+
     const baseLayer = new TileLayer({ source: new OSM() });
 
     const vehicleSource = new VectorSource();
-    const vehicleLayer = new VectorLayer({ source: vehicleSource });
-    vehicleLayerRef.current = vehicleSource;
+    const vehicleLayer = new VectorLayer({
+      source: vehicleSource,
+      declutter: true,
+    });
+    vehicleLayerRef.current = vehicleLayer;
 
     const pathSource = new VectorSource();
     const pathLayer = new VectorLayer({
@@ -44,7 +47,7 @@ function MapView() {
         stroke: new Stroke({ color: "red", width: 3 }),
       }),
     });
-    pathLayerRef.current = pathSource;
+    pathLayerRef.current = pathLayer;
 
     mapInstance.current = new Map({
       target: mapRef.current,
@@ -54,16 +57,26 @@ function MapView() {
         zoom: 14,
       }),
     });
+
+    // Add static label feature (e.g., city center label)
+    const staticLabelFeature = new Feature({
+      geometry: new Point(fromLonLat([85.324, 27.7172])),
+    });
+    staticLabelFeature.setId("static-label");
+    staticLabelFeature.setStyle(createFeatureStyle("Static Label"));
+    vehicleSource.addFeature(staticLabelFeature);
   }, []);
 
-  // Fetch Live Vehicles Initially
+  // Fetch vehicles initially
   useEffect(() => {
     fetchLiveVehicles()
-      .then((res) => setVehicles(res.data))
+      .then((res) => {
+        setVehicles(res.data);
+      })
       .catch(console.error);
   }, []);
 
-  // Handle WebSocket Live Updates
+  // WebSocket updates
   useVehicleWebSocket((data) => {
     setVehicles((prev) => {
       const index = prev.findIndex((v) => v.vehicleId === data.vehicleId);
@@ -76,43 +89,68 @@ function MapView() {
     });
   });
 
-  // Update vehicle markers on map
+  // Create style for vehicle features with label
+  function createFeatureStyle(labelText) {
+    return new Style({
+      image: new Icon({
+        src: "https://cdn-icons-png.flaticon.com/512/334/334998.png",
+        scale: 0.07,
+      }),
+      text: new Text({
+        text: labelText,
+        font: "bold 14px Arial",
+        overflow: true,
+        fill: new Fill({ color: "black" }),
+        backgroundFill: new Fill({ color: "white" }),
+        padding: [2, 2, 2, 2],
+        offsetY: -25,
+      }),
+    });
+  }
+
+  // Update vehicle markers whenever vehicles or filters change
   useEffect(() => {
     if (!vehicleLayerRef.current) return;
 
-    vehicleLayerRef.current.clear();
+    const source = vehicleLayerRef.current.getSource();
+
+    // Keep static label ID so we don't remove it
+    const staticLabelId = "static-label";
 
     const filteredVehicles = showAll
       ? vehicles
       : vehicles.filter((v) => v.vehicleNumber === vehicleNumber);
 
+    // Remove features that are not in filteredVehicles (but keep static label)
+    const filteredIds = new Set(filteredVehicles.map((v) => v.vehicleId));
+    source.getFeatures().forEach((feature) => {
+      const fid = feature.getId();
+      if (fid !== staticLabelId && !filteredIds.has(fid)) {
+        source.removeFeature(feature);
+      }
+    });
+
+    // Add or update filtered vehicles features
     filteredVehicles.forEach((v) => {
-      const feature = new Feature({
-        geometry: new Point(fromLonLat([v.longitude, v.latitude])),
-      });
+      let feature = source.getFeatureById(v.vehicleId);
+      const coord = fromLonLat([v.longitude, v.latitude]);
 
-      feature.setStyle(
-        new Style({
-          image: new Icon({
-            src: "https://cdn-icons-png.flaticon.com/512/334/334998.png", // car icon
-            scale: 0.05,
-          }),
-          text: new Text({
-            text: v.vehicleNumber,
-            font: "bold 14px Arial",
-            fill: new Fill({ color: "black" }),
-            offsetY: -25,
-            backgroundFill: new Fill({ color: "white" }),
-            padding: [2, 2, 2, 2],
-          }),
-        })
-      );
+      if (!feature) {
+        feature = new Feature({
+          geometry: new Point(coord),
+        });
+        feature.setId(v.vehicleId);
+        source.addFeature(feature);
+      } else {
+        feature.setGeometry(new Point(coord));
+      }
 
-      vehicleLayerRef.current.addFeature(feature);
+      feature.setStyle(createFeatureStyle(v.vehicleNumber));
+      feature.changed();
     });
   }, [vehicles, showAll, vehicleNumber]);
 
-  // Handle path fetch
+  // Handle path fetch and display
   const handlePathRequest = async () => {
     if (!vehicleNumber || !fromDate || !toDate) return;
     setShowAll(false);
@@ -123,17 +161,47 @@ function MapView() {
     try {
       const res = await fetchVehiclePath(vehicleNumber, fromISO, toISO);
 
+      if (!res.data?.coordinates || res.data.coordinates.length < 2) {
+        alert("Path too short or empty.");
+        return;
+      }
+
       const coordinates = res.data.coordinates.map((pt) =>
         fromLonLat([pt.x, pt.y])
       );
 
-      pathLayerRef.current.clear();
+      const source = pathLayerRef.current.getSource();
+      source.clear();
 
       const line = new Feature({
         geometry: new LineString(coordinates),
       });
+      source.addFeature(line);
 
-      pathLayerRef.current.addFeature(line);
+      // Add vehicle icon at path end point with label
+      const lastCoord = coordinates[coordinates.length - 1];
+
+      const vehicleSource = vehicleLayerRef.current.getSource();
+
+      // Clear all vehicle features except static label
+      vehicleSource
+        .getFeatures()
+        .filter((f) => f.getId() !== "static-label")
+        .forEach((f) => vehicleSource.removeFeature(f));
+
+      const pathVehicleMarker = new Feature({
+        geometry: new Point(lastCoord),
+      });
+      pathVehicleMarker.setId("path-vehicle");
+
+      pathVehicleMarker.setStyle(createFeatureStyle(vehicleNumber));
+      vehicleSource.addFeature(pathVehicleMarker);
+
+      // Zoom to fit path line
+      mapInstance.current.getView().fit(line.getGeometry().getExtent(), {
+        padding: [50, 50, 50, 50],
+        duration: 500,
+      });
     } catch (err) {
       console.error("Error fetching path:", err);
     }
@@ -180,7 +248,7 @@ function MapView() {
             onClick={() => {
               setShowAll(true);
               setVehicleNumber("");
-              pathLayerRef.current?.clear();
+              pathLayerRef.current?.getSource()?.clear();
             }}
           >
             Show All
