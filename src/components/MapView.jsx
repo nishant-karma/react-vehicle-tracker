@@ -13,7 +13,7 @@ import ControlsPanel from "./ControlsPanel";
 import GeoJSON from "ol/format/GeoJSON";
 
 import useVehicleWebSocket from "../hooks/useVehicleWebSocket";
-import usePolygon from "../hooks/usePolygon";
+import useDraw from "../hooks/useDraw";
 
 import {
   fetchVehiclePath,
@@ -91,14 +91,16 @@ const MapView = () => {
 
   // Polygon selection/edit state handled inside hook
   const {
-    drawPolygon,
+    drawGeometry,
     selectAndModifyPolygon,
     exportDrawnPolygonGeoJSON,
     selectedPolygon,
     drawnPolygonRef,
     selectRef,
     modifyRef,
-  } = usePolygon(mapInstance, polygonLayerRef);
+    drawInteractionRef,
+    hasDrawnPolygon,
+  } = useDraw(mapInstance, polygonLayerRef);
 
   // Live vehicle fetch on mount
   useEffect(() => {
@@ -218,12 +220,43 @@ const MapView = () => {
   };
 
   // Save drawn polygon
+
   const handleSavePolygonRequest = async () => {
-    if (!drawnPolygonRef.current) {
-      alert("No polygon drawn");
-      return;
-    }
     try {
+      const format = new GeoJSON();
+
+      // Check if an edited polygon is selected
+      if (selectedPolygon) {
+        const geometry = format.writeGeometryObject(
+          selectedPolygon.getGeometry(),
+          {
+            featureProjection: "EPSG:3857",
+            dataProjection: "EPSG:4326",
+          }
+        );
+        const id = selectedPolygon.getId();
+
+        await editPolygon({
+          id,
+          coordinates: geometry,
+        });
+
+        alert("Polygon edited successfully!");
+
+        // Cleanup edit state
+        if (modifyRef.current) {
+          mapInstance.current.removeInteraction(modifyRef.current);
+          modifyRef.current = null;
+        }
+        return;
+      }
+
+      // Otherwise, save new drawn polygon
+      if (!drawnPolygonRef.current) {
+        alert("No polygon drawn");
+        return;
+      }
+
       const geojson = exportDrawnPolygonGeoJSON();
 
       await savePolygon({ coordinates: geojson.geometry });
@@ -238,7 +271,6 @@ const MapView = () => {
       setFromDate(null);
       setToDate(null);
 
-      // Reload vehicles
       fetchLiveVehicles()
         .then((res) => setVehicles(res.data))
         .catch(console.error);
@@ -247,6 +279,7 @@ const MapView = () => {
       alert("Saving Polygon Failed, Please Try Again");
     }
   };
+
 
   // Fetch and display all saved polygons
   const handleViewPolygonRequest = async () => {
@@ -297,43 +330,36 @@ const MapView = () => {
 
   // Reset map and filters
   const handleResetMapView = () => {
+    // Clear polygons and paths
     polygonLayerRef.current?.getSource()?.clear();
     pathLayerRef.current?.getSource()?.clear();
+
+    // Reset vehicle filters
     setVehicleNumber("");
     setShowAll(true);
     setFromDate(null);
     setToDate(null);
 
+    // Remove draw interaction if active
+    if (drawInteractionRef.current) {
+      mapInstance.current?.removeInteraction(drawInteractionRef.current);
+      drawInteractionRef.current = null;
+    }
+
+    // Optionally remove modify/select interactions too
+    if (modifyRef.current) {
+      mapInstance.current?.removeInteraction(modifyRef.current);
+      modifyRef.current = null;
+    }
+
+    if (selectRef.current) {
+      mapInstance.current?.removeInteraction(selectRef.current);
+      selectRef.current = null;
+    }
+
+    // Reset map view to default location
     mapInstance.current?.getView().setCenter(fromLonLat([85.324, 27.7172]));
     mapInstance.current?.getView().setZoom(14);
-  };
-
-  // Save polygon edits
-  const handleSaveEditedPolygon = async () => {
-    if (!selectedPolygon) {
-      alert("No polygon selected");
-      return;
-    }
-    try {
-      const coords = selectedPolygon.getGeometry().getCoordinates();
-      const id = selectedPolygon.getId();
-
-      await editPolygon({ id, coordinates: coords });
-
-      alert("Polygon updated successfully!");
-
-      // Clear selection and editing interactions
-      setTimeout(() => {
-        if (modifyRef.current) {
-          mapInstance.current.removeInteraction(modifyRef.current);
-          modifyRef.current = null;
-        }
-      }, 100);
-
-    } catch (err) {
-      console.error(err);
-      alert("Failed to save edited polygon");
-    }
   };
 
   return (
@@ -353,14 +379,12 @@ const MapView = () => {
           setVehicleNumber("");
           pathLayerRef.current?.getSource()?.clear();
         }}
-        onDrawPolygon={drawPolygon}
+        onDrawGeometry={drawGeometry}
         onSavePolygon={handleSavePolygonRequest}
-        canSavePolygon={!!drawnPolygonRef.current}
+        canSavePolygon={!!selectedPolygon || hasDrawnPolygon}
         onViewPolygons={handleViewPolygonRequest}
         onReset={handleResetMapView}
         selectedPolygon={selectedPolygon}
-        onEnableEdit={selectAndModifyPolygon}
-        onSaveEdit={handleSaveEditedPolygon}
       />
 
       <div className="card shadow">

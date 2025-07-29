@@ -1,4 +1,4 @@
-// src/hooks/usePolygon.js
+// src/hooks/useDraw.js
 import { useRef, useState } from "react";
 import Draw from "ol/interaction/Draw";
 import Select from "ol/interaction/Select";
@@ -7,31 +7,32 @@ import Collection from "ol/Collection";
 import { doubleClick } from "ol/events/condition";
 import GeoJSON from "ol/format/GeoJSON";
 
-export default function usePolygon(mapInstance, polygonLayerRef) {
+export default function useDraw(mapInstance, polygonLayerRef) {
     const drawRef = useRef(null);
     const selectRef = useRef(null);
     const modifyRef = useRef(null);
     const drawnPolygonRef = useRef(null);
+    const drawInteractionRef = useRef(null);
     const [selectedPolygon, setSelectedPolygon] = useState(null);
     const [hasDrawnPolygon, setHasDrawnPolygon] = useState(false);
 
-    const drawPolygon = () => {
-        if (drawRef.current) return;
+    const drawGeometry = (type = "Polygon") => {
+        if (drawInteractionRef.current) return;
 
         const draw = new Draw({
             source: polygonLayerRef.current.getSource(),
-            type: "Polygon",
+            type,   // ✅ now type is passed as param
         });
 
         draw.on("drawend", (event) => {
             drawnPolygonRef.current = event.feature;
-            setHasDrawnPolygon(true);  // <--- set state here
+            setHasDrawnPolygon(true); // ✅ trigger UI update
             mapInstance.current.removeInteraction(draw);
-            drawRef.current = null;
+            drawInteractionRef.current = null;
         });
 
         mapInstance.current.addInteraction(draw);
-        drawRef.current = draw;
+        drawInteractionRef.current = draw;
     };
 
     const selectAndModifyPolygon = () => {
@@ -70,12 +71,14 @@ export default function usePolygon(mapInstance, polygonLayerRef) {
     };
 
     return {
-        drawPolygon,
+        drawGeometry,
         selectAndModifyPolygon,
         exportDrawnPolygonGeoJSON,
         selectedPolygon,
         drawnPolygonRef,
         selectRef,
         modifyRef,
+        drawInteractionRef,
+        hasDrawnPolygon,
     };
 }

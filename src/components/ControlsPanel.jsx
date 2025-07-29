@@ -1,10 +1,7 @@
-// Step 1: Extracting ControlsPanel.jsx
+// src/components/ControlsPanel.jsx
+import React, { useState } from "react";
 
-import React from "react";
-import DatePicker from "react-datepicker";
-import "react-datepicker/dist/react-datepicker.css";
-
-function ControlsPanel({
+const ControlsPanel = ({
   vehicleNumber,
   setVehicleNumber,
   fromDate,
@@ -13,18 +10,19 @@ function ControlsPanel({
   setToDate,
   onShowPath,
   onShowAll,
-  onDrawPolygon,
+  onDrawGeometry,
   onSavePolygon,
   canSavePolygon,
   onViewPolygons,
   onReset,
   selectedPolygon,
   onEnableEdit,
-  onSaveEdit,
-}) {
+}) => {
+  const [drawType, setDrawType] = useState("Polygon");
+
   return (
-    <div className="row mb-3">
-      <div className="col-md-3">
+    <div className="row mb-3 g-2 align-items-center">
+      <div className="col-md-2">
         <input
           type="text"
           className="form-control"
@@ -33,77 +31,79 @@ function ControlsPanel({
           onChange={(e) => setVehicleNumber(e.target.value)}
         />
       </div>
-      <div className="col-md-3" style={{ zIndex: 1000 }}>
-        <DatePicker
-          selected={fromDate}
-          onChange={(date) => setFromDate(date)}
+
+      <div className="col-md-2">
+        <input
+          type="date"
           className="form-control"
-          placeholderText="From Date"
-          dateFormat="yyyy-MM-dd"
+          value={fromDate ? fromDate.toISOString().slice(0, 10) : ""}
+          onChange={(e) => setFromDate(e.target.value ? new Date(e.target.value) : null)}
         />
       </div>
-      <div className="col-md-3" style={{ zIndex: 1000 }}>
-        <DatePicker
-          selected={toDate}
-          onChange={(date) => setToDate(date)}
+
+      <div className="col-md-2">
+        <input
+          type="date"
           className="form-control"
-          placeholderText="To Date"
-          dateFormat="yyyy-MM-dd"
+          value={toDate ? toDate.toISOString().slice(0, 10) : ""}
+          onChange={(e) => setToDate(e.target.value ? new Date(e.target.value) : null)}
         />
       </div>
-      <div className="col-md-3 d-flex gap-2">
-        <button className="btn btn-primary w-50" onClick={onShowPath}>
+
+      <div className="col-md-2 d-grid">
+        <button className="btn btn-primary" onClick={onShowPath}>
           Show Path
         </button>
-        <button className="btn btn-secondary w-50" onClick={onShowAll}>
+      </div>
+
+      <div className="col-md-2 d-grid">
+        <button className="btn btn-secondary" onClick={onShowAll}>
           Show All
         </button>
       </div>
 
       <div className="col-md-3 mt-2">
-        <button className="btn btn-success w-100" onClick={onDrawPolygon}>
-          Draw Polygon
+        <select
+          className="form-select mb-2"
+          value={drawType}
+          onChange={(e) => setDrawType(e.target.value)}
+        >
+          <option value="Point">Point</option>
+          <option value="LineString">LineString</option>
+          <option value="Polygon">Polygon</option>
+        </select>
+
+        <button
+          className="btn btn-success w-100"
+          onClick={() => onDrawGeometry(drawType)}
+        >
+          Draw {drawType}
         </button>
       </div>
-      <div className="col-md-3 mt-2">
+
+      <div className="col-md-2 mt-2 d-grid">
         <button
-          className="btn btn-outline-primary w-100"
+          className="btn btn-info"
           onClick={onSavePolygon}
           disabled={!canSavePolygon}
         >
           Save Polygon
         </button>
       </div>
-      <div className="col-md-3 mt-2">
-        <button className="btn btn-warning w-100" onClick={onViewPolygons}>
-          📐 View All Polygons
+
+      <div className="col-md-2 mt-2 d-grid">
+        <button className="btn btn-warning" onClick={onViewPolygons}>
+          View Polygons
         </button>
       </div>
-      <div>
+
+      <div className="col-md-2 mt-2 d-grid">
         <button className="btn btn-danger" onClick={onReset}>
-          🔄 Reset Map
-        </button>
-      </div>
-      <div>
-        <button
-          className="btn btn-info"
-          disabled={!selectedPolygon}
-          onClick={onEnableEdit}
-        >
-          ✏️ Edit Polygon
-        </button>
-      </div>
-      <div>
-        <button
-          className="btn btn-outline-success ms-2"
-          disabled={!selectedPolygon}
-          onClick={onSaveEdit}
-        >
-          📂 Save Edited Polygon
+          Reset Map
         </button>
       </div>
     </div>
   );
-}
+};
 
 export default ControlsPanel;
