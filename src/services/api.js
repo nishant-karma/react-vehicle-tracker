@@ -21,7 +21,7 @@ export const fetchVehiclePath = (vehicleNumber, from, to) =>
 
   export const fetchLiveVehicles = () => API.get("/vehicles/live");
 
-  export const savePolygon = (coordinates) => API.post("/polygons/save",{coordinates});
+  export const savePolygon = (payload) => API.post("/polygons/save",payload);
 
   export const getAllPolygons = () => API.get("/polygons/get");
 
