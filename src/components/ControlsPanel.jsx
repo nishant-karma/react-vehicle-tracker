@@ -15,13 +15,13 @@ const ControlsPanel = ({
   canSavePolygon,
   onViewPolygons,
   onReset,
-  selectedPolygon,
-  onEnableEdit,
 }) => {
   const [drawType, setDrawType] = useState("Polygon");
 
   return (
     <div className="row mb-3 g-2 align-items-center">
+
+      {/* Vehicle Number Input */}
       <div className="col-md-2">
         <input
           type="text"
@@ -32,36 +32,45 @@ const ControlsPanel = ({
         />
       </div>
 
+      {/* From Date Input */}
       <div className="col-md-2">
         <input
           type="date"
           className="form-control"
           value={fromDate ? fromDate.toISOString().slice(0, 10) : ""}
-          onChange={(e) => setFromDate(e.target.value ? new Date(e.target.value) : null)}
+          onChange={(e) =>
+            setFromDate(e.target.value ? new Date(e.target.value) : null)
+          }
         />
       </div>
 
+      {/* To Date Input */}
       <div className="col-md-2">
         <input
           type="date"
           className="form-control"
           value={toDate ? toDate.toISOString().slice(0, 10) : ""}
-          onChange={(e) => setToDate(e.target.value ? new Date(e.target.value) : null)}
+          onChange={(e) =>
+            setToDate(e.target.value ? new Date(e.target.value) : null)
+          }
         />
       </div>
 
+      {/* Show Path */}
       <div className="col-md-2 d-grid">
         <button className="btn btn-primary" onClick={onShowPath}>
           Show Path
         </button>
       </div>
 
+      {/* Show All Vehicles */}
       <div className="col-md-2 d-grid">
         <button className="btn btn-secondary" onClick={onShowAll}>
           Show All
         </button>
       </div>
 
+      {/* Draw Feature Section */}
       <div className="col-md-3 mt-2">
         <select
           className="form-select mb-2"
@@ -81,22 +90,25 @@ const ControlsPanel = ({
         </button>
       </div>
 
+      {/* Save Feature */}
       <div className="col-md-2 mt-2 d-grid">
         <button
           className="btn btn-info"
           onClick={onSavePolygon}
           disabled={!canSavePolygon}
         >
-          Save Polygon
+          Save Feature
         </button>
       </div>
 
+      {/* View Features */}
       <div className="col-md-2 mt-2 d-grid">
         <button className="btn btn-warning" onClick={onViewPolygons}>
-          View Polygons
+          View Features
         </button>
       </div>
 
+      {/* Reset Map */}
       <div className="col-md-2 mt-2 d-grid">
         <button className="btn btn-danger" onClick={onReset}>
           Reset Map

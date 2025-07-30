@@ -7,26 +7,39 @@ import Collection from "ol/Collection";
 import { doubleClick } from "ol/events/condition";
 import GeoJSON from "ol/format/GeoJSON";
 
-export default function useDraw(mapInstance, polygonLayerRef) {
-    const drawRef = useRef(null);
-    const selectRef = useRef(null);
-    const modifyRef = useRef(null);
-    const drawnPolygonRef = useRef(null);
+/**
+ * Hook to draw and modify geometries (Point, LineString, Polygon)
+ * on the given map and vector layer.
+ *
+ * @param {React.RefObject} mapInstance - Ref to OpenLayers map instance
+ * @param {React.RefObject} vectorLayerRef - Ref to vector layer for drawing
+ * @returns {Object} drawing and editing controls
+ */
+export default function useDraw(mapInstance, vectorLayerRef) {
     const drawInteractionRef = useRef(null);
-    const [selectedPolygon, setSelectedPolygon] = useState(null);
-    const [hasDrawnPolygon, setHasDrawnPolygon] = useState(false);
+    const modifyRef = useRef(null);
+    const selectRef = useRef(null);
+    const drawnFeatureRef = useRef(null);
 
+    const [selectedFeature, setSelectedFeature] = useState(null);
+    const [hasDrawn, setHasDrawn] = useState(false);
+
+    /**
+     * Starts drawing a geometry of the given type
+     * @param {"Point" | "LineString" | "Polygon"} type
+     */
     const drawGeometry = (type = "Polygon") => {
+        if (!mapInstance.current || !vectorLayerRef.current) return;
         if (drawInteractionRef.current) return;
 
         const draw = new Draw({
-            source: polygonLayerRef.current.getSource(),
-            type,   // ✅ now type is passed as param
+            source: vectorLayerRef.current.getSource(),
+            type,
         });
 
         draw.on("drawend", (event) => {
-            drawnPolygonRef.current = event.feature;
-            setHasDrawnPolygon(true); // ✅ trigger UI update
+            drawnFeatureRef.current = event.feature;
+            setHasDrawn(true);
             mapInstance.current.removeInteraction(draw);
             drawInteractionRef.current = null;
         });
@@ -35,20 +48,26 @@ export default function useDraw(mapInstance, polygonLayerRef) {
         drawInteractionRef.current = draw;
     };
 
-    const selectAndModifyPolygon = () => {
+    /**
+     * Enables selecting and modifying drawn feature (on double click)
+     */
+    const selectAndModify = () => {
+        if (!mapInstance.current || !vectorLayerRef.current) return;
+
+        // Cleanup existing interactions
         if (selectRef.current) mapInstance.current.removeInteraction(selectRef.current);
         if (modifyRef.current) mapInstance.current.removeInteraction(modifyRef.current);
 
         const select = new Select({
             condition: doubleClick,
-            layers: [polygonLayerRef.current],
+            layers: [vectorLayerRef.current],
         });
 
         select.on("select", (e) => {
             const feature = e.selected[0];
             if (!feature) return;
 
-            setSelectedPolygon(feature);
+            setSelectedFeature(feature);
 
             const modify = new Modify({
                 features: new Collection([feature]),
@@ -62,9 +81,15 @@ export default function useDraw(mapInstance, polygonLayerRef) {
         selectRef.current = select;
     };
 
-    const exportDrawnPolygonGeoJSON = () => {
+    /**
+     * Converts the drawn feature to GeoJSON format (EPSG:4326)
+     * @returns {Object|null} GeoJSON object or null
+     */
+    const exportDrawnFeatureGeoJSON = () => {
+        if (!drawnFeatureRef.current) return null;
+
         const format = new GeoJSON();
-        return format.writeFeatureObject(drawnPolygonRef.current, {
+        return format.writeFeatureObject(drawnFeatureRef.current, {
             featureProjection: "EPSG:3857",
             dataProjection: "EPSG:4326",
         });
@@ -72,13 +97,13 @@ export default function useDraw(mapInstance, polygonLayerRef) {
 
     return {
         drawGeometry,
-        selectAndModifyPolygon,
-        exportDrawnPolygonGeoJSON,
-        selectedPolygon,
-        drawnPolygonRef,
+        selectAndModify,
+        exportDrawnFeatureGeoJSON,
+        selectedFeature,
+        drawnFeatureRef,
+        hasDrawn,
+        drawInteractionRef,
         selectRef,
         modifyRef,
-        drawInteractionRef,
-        hasDrawnPolygon,
     };
 }

@@ -3,7 +3,7 @@ import React, { useRef, useState, useEffect } from "react";
 import { fromLonLat } from "ol/proj";
 import { Point, LineString } from "ol/geom";
 import Feature from "ol/Feature";
-import { Style, Icon, Text, Fill, Stroke } from "ol/style";
+import { Style, Icon, Text, Fill } from "ol/style";
 
 import MapContainer from "./MapContainer";
 import VehicleLayer from "../layers/VehicleLayer";
@@ -16,13 +16,15 @@ import useVehicleWebSocket from "../hooks/useVehicleWebSocket";
 import useDraw from "../hooks/useDraw";
 
 import {
-  fetchVehiclePath,
+  saveFeature,
+  getAllFeatures,
+  editFeature,
+  deleteFeature,
   fetchLiveVehicles,
-  savePolygon,
-  getAllPolygons,
-  editPolygon,
-} from "../services/api";
+  fetchVehiclePath
+} from '../services/api';
 
+// Utility for vehicle icon + label
 function createVehicleFeatures(vehicle) {
   const coord = fromLonLat([vehicle.longitude, vehicle.latitude]);
 
@@ -55,6 +57,7 @@ function createVehicleFeatures(vehicle) {
   return [iconFeature, labelFeature];
 }
 
+// Utility for styling path-end marker
 function createFeatureStyle(labelText) {
   return new Style({
     image: new Icon({
@@ -73,43 +76,55 @@ function createFeatureStyle(labelText) {
   });
 }
 
+// 🔁 Convert GeoJSON geometry to backend FeatureRequestDTO
+function convertGeoJSONToFeatureRequestDTO(geometry) {
+  const { type, coordinates } = geometry;
+
+  switch (type) {
+    case "Point":
+      return { featureType: "Point", point: coordinates };
+    case "LineString":
+      return { featureType: "LineString", lineString: coordinates };
+    case "Polygon":
+      return { featureType: "Polygon", polygon: coordinates };
+    default:
+      throw new Error(`Unsupported geometry type: ${type}`);
+  }
+}
+
 const MapView = () => {
   const mapRef = useRef();
   const mapInstance = useRef(null);
 
-  // Layer refs to manipulate OL vector layers directly
   const vehicleLayerRef = useRef(null);
   const pathLayerRef = useRef(null);
   const polygonLayerRef = useRef(null);
 
-  // Vehicle & filters state
   const [vehicles, setVehicles] = useState([]);
   const [vehicleNumber, setVehicleNumber] = useState("");
   const [fromDate, setFromDate] = useState(null);
   const [toDate, setToDate] = useState(null);
   const [showAll, setShowAll] = useState(true);
+  const [drawType, setDrawType] = useState("Polygon");
 
-  // Polygon selection/edit state handled inside hook
   const {
     drawGeometry,
-    selectAndModifyPolygon,
-    exportDrawnPolygonGeoJSON,
-    selectedPolygon,
-    drawnPolygonRef,
+    selectAndModify,
+    exportDrawnFeatureGeoJSON,
+    selectedFeature,
+    drawnFeatureRef,
+    drawInteractionRef,
     selectRef,
     modifyRef,
-    drawInteractionRef,
-    hasDrawnPolygon,
+    hasDrawn,
   } = useDraw(mapInstance, polygonLayerRef);
 
-  // Live vehicle fetch on mount
   useEffect(() => {
     fetchLiveVehicles()
       .then((res) => setVehicles(res.data))
       .catch(console.error);
   }, []);
 
-  // Live vehicle updates via websocket
   useVehicleWebSocket((data) => {
     setVehicles((prev) => {
       const index = prev.findIndex((v) => v.vehicleId === data.vehicleId);
@@ -122,49 +137,43 @@ const MapView = () => {
     });
   });
 
-  // Update vehicle layer when vehicles or filters change
   useEffect(() => {
     if (!vehicleLayerRef.current) return;
 
     const source = vehicleLayerRef.current.getSource();
-    const filteredVehicles = showAll
+    const filtered = showAll
       ? vehicles
       : vehicles.filter((v) => v.vehicleNumber === vehicleNumber);
 
     const newIds = new Set();
 
-    filteredVehicles.forEach((v) => {
-      const [iconFeature, labelFeature] = createVehicleFeatures(v);
-      newIds.add(iconFeature.getId());
-      newIds.add(labelFeature.getId());
+    filtered.forEach((v) => {
+      const [icon, label] = createVehicleFeatures(v);
+      newIds.add(icon.getId());
+      newIds.add(label.getId());
 
-      const iconExisting = source.getFeatureById(iconFeature.getId());
-      const labelExisting = source.getFeatureById(labelFeature.getId());
+      const existingIcon = source.getFeatureById(icon.getId());
+      const existingLabel = source.getFeatureById(label.getId());
 
-      if (!iconExisting) source.addFeature(iconFeature);
-      else iconExisting.setGeometry(iconFeature.getGeometry());
+      if (!existingIcon) source.addFeature(icon);
+      else existingIcon.setGeometry(icon.getGeometry());
 
-      if (!labelExisting) source.addFeature(labelFeature);
-      else labelExisting.setGeometry(labelFeature.getGeometry());
+      if (!existingLabel) source.addFeature(label);
+      else existingLabel.setGeometry(label.getGeometry());
     });
 
-    // Remove features that no longer match
     source.getFeatures().forEach((f) => {
       if (!newIds.has(f.getId())) source.removeFeature(f);
     });
   }, [vehicles, showAll, vehicleNumber]);
 
-  // Show vehicle path between dates
   const handlePathRequest = async () => {
     if (!vehicleNumber || !fromDate || !toDate) return;
+
     setShowAll(false);
 
-    const formatDate = (date, time = "00:00:00") => {
-      const year = date.getFullYear();
-      const month = String(date.getMonth() + 1).padStart(2, "0");
-      const day = String(date.getDate()).padStart(2, "0");
-      return `${year}-${month}-${day}T${time}`;
-    };
+    const formatDate = (date, time = "00:00:00") =>
+      `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}T${time}`;
 
     const fromISO = formatDate(fromDate, "00:00:00");
     const toISO = formatDate(toDate, "23:59:59");
@@ -183,32 +192,26 @@ const MapView = () => {
       const source = pathLayerRef.current.getSource();
       source.clear();
 
-      // Add path line
-      const pathFeature = new Feature({
-        geometry: new LineString(coords),
-      });
-      source.addFeature(pathFeature);
+      const path = new Feature({ geometry: new LineString(coords) });
+      source.addFeature(path);
 
-      // Add vehicle marker at path end
-      const lastCoord = coords[coords.length - 1];
-      const pathVehicleMarker = new Feature(new Point(lastCoord));
-      pathVehicleMarker.setStyle(createFeatureStyle(vehicleNumber));
-      source.addFeature(pathVehicleMarker);
+      const last = coords.at(-1);
+      const marker = new Feature(new Point(last));
+      marker.setStyle(createFeatureStyle(vehicleNumber));
+      source.addFeature(marker);
 
-      // Update vehicle layer to show only this vehicle at path end
       const vehicleSource = vehicleLayerRef.current.getSource();
       vehicleSource.clear();
 
-      const [iconFeature, labelFeature] = createVehicleFeatures({
+      const [icon, label] = createVehicleFeatures({
         vehicleId: "path-end",
         vehicleNumber,
         longitude: res.data.coordinates.at(-1).x,
         latitude: res.data.coordinates.at(-1).y,
       });
-      vehicleSource.addFeature(iconFeature);
-      vehicleSource.addFeature(labelFeature);
+      vehicleSource.addFeature(icon);
+      vehicleSource.addFeature(label);
 
-      // Fit map view to path extent with padding and animation
       mapInstance.current.getView().fit(source.getExtent(), {
         padding: [50, 50, 50, 50],
         duration: 500,
@@ -219,31 +222,24 @@ const MapView = () => {
     }
   };
 
-  // Save drawn polygon
-
-  const handleSavePolygonRequest = async () => {
+  const handleSaveFeatureRequest = async () => {
     try {
       const format = new GeoJSON();
 
-      // Check if an edited polygon is selected
-      if (selectedPolygon) {
+      if (selectedFeature) {
         const geometry = format.writeGeometryObject(
-          selectedPolygon.getGeometry(),
+          selectedFeature.getGeometry(),
           {
             featureProjection: "EPSG:3857",
             dataProjection: "EPSG:4326",
           }
         );
-        const id = selectedPolygon.getId();
 
-        await editPolygon({
-          id,
-          coordinates: geometry,
-        });
+        const dto = convertGeoJSONToFeatureRequestDTO(geometry);
 
-        alert("Polygon edited successfully!");
+        await editFeature(selectedFeature.getId(), dto);
+        alert("✅ Feature edited!");
 
-        // Cleanup edit state
         if (modifyRef.current) {
           mapInstance.current.removeInteraction(modifyRef.current);
           modifyRef.current = null;
@@ -251,19 +247,17 @@ const MapView = () => {
         return;
       }
 
-      // Otherwise, save new drawn polygon
-      if (!drawnPolygonRef.current) {
-        alert("No polygon drawn");
+      if (!drawnFeatureRef.current) {
+        alert("❌ No feature drawn");
         return;
       }
 
-      const geojson = exportDrawnPolygonGeoJSON();
+      const geojson = exportDrawnFeatureGeoJSON();
+      const dto = convertGeoJSONToFeatureRequestDTO(geojson.geometry);
 
-      await savePolygon({ coordinates: geojson.geometry });
+      await saveFeature(dto);
+      alert("✅ Feature saved!");
 
-      alert("Polygon Saved Successfully");
-
-      // Clear polygon and path layers and reset filters
       polygonLayerRef.current?.getSource()?.clear();
       pathLayerRef.current?.getSource()?.clear();
       setShowAll(true);
@@ -271,45 +265,41 @@ const MapView = () => {
       setFromDate(null);
       setToDate(null);
 
-      fetchLiveVehicles()
-        .then((res) => setVehicles(res.data))
-        .catch(console.error);
+      const res = await fetchLiveVehicles();
+      setVehicles(res.data);
     } catch (err) {
-      console.error("Save Polygon Error:", err);
-      alert("Saving Polygon Failed, Please Try Again");
+      console.error("Save Feature Error:", err);
+      alert("❌ Saving Failed");
     }
   };
 
-
-  // Fetch and display all saved polygons
-  const handleViewPolygonRequest = async () => {
+  const handleViewFeatures = async () => {
     try {
-      const res = await getAllPolygons();
-      const polygons = res.data;
+      const res = await getAllFeatures();
+      const features = res.data;
       const polygonSource = polygonLayerRef.current.getSource();
       polygonSource.clear();
 
       const format = new GeoJSON();
 
-      polygons.forEach((poly) => {
-        if (!poly.geometry || poly.geometry.type !== "Polygon") {
-          console.warn("Invalid polygon geometry", poly);
-          return;
-        }
+      features.forEach((f) => {
+        if (!f.geometry) return;
+
         const feature = format.readFeature(
           {
             type: "Feature",
-            geometry: poly.geometry,
-            properties: { id: poly.polygonId },
+            geometry: f.geometry,
+            properties: { id: f.featureTypeId },
           },
-          { dataProjection: "EPSG:4326", featureProjection: "EPSG:3857" }
+          {
+            dataProjection: "EPSG:4326",
+            featureProjection: "EPSG:3857",
+          }
         );
-        feature.setId(poly.polygonId);
-
+        feature.setId(f.featureTypeId);
         polygonSource.addFeature(feature);
       });
 
-      // Remove existing interactions and add new select for polygon editing
       if (selectRef.current) {
         mapInstance.current.removeInteraction(selectRef.current);
         selectRef.current = null;
@@ -319,34 +309,28 @@ const MapView = () => {
         modifyRef.current = null;
       }
 
-      selectAndModifyPolygon();
-
-      alert("✅ All saved polygons displayed.");
+      selectAndModify();
+      alert("✅ Features loaded.");
     } catch (err) {
-      console.error("Polygon fetch error:", err);
-      alert("❌ Failed to fetch polygons.");
+      console.error("Fetch error:", err);
+      alert("❌ Failed to fetch features.");
     }
   };
 
-  // Reset map and filters
   const handleResetMapView = () => {
-    // Clear polygons and paths
     polygonLayerRef.current?.getSource()?.clear();
     pathLayerRef.current?.getSource()?.clear();
 
-    // Reset vehicle filters
     setVehicleNumber("");
     setShowAll(true);
     setFromDate(null);
     setToDate(null);
 
-    // Remove draw interaction if active
     if (drawInteractionRef.current) {
       mapInstance.current?.removeInteraction(drawInteractionRef.current);
       drawInteractionRef.current = null;
     }
 
-    // Optionally remove modify/select interactions too
     if (modifyRef.current) {
       mapInstance.current?.removeInteraction(modifyRef.current);
       modifyRef.current = null;
@@ -357,7 +341,6 @@ const MapView = () => {
       selectRef.current = null;
     }
 
-    // Reset map view to default location
     mapInstance.current?.getView().setCenter(fromLonLat([85.324, 27.7172]));
     mapInstance.current?.getView().setZoom(14);
   };
@@ -379,12 +362,15 @@ const MapView = () => {
           setVehicleNumber("");
           pathLayerRef.current?.getSource()?.clear();
         }}
-        onDrawGeometry={drawGeometry}
-        onSavePolygon={handleSavePolygonRequest}
-        canSavePolygon={!!selectedPolygon || hasDrawnPolygon}
-        onViewPolygons={handleViewPolygonRequest}
+        onDrawGeometry={(type) => {
+          setDrawType(type);
+          drawGeometry(type);
+        }}
+        onSavePolygon={handleSaveFeatureRequest}
+        canSavePolygon={!!selectedFeature || hasDrawn}
+        onViewPolygons={handleViewFeatures}
         onReset={handleResetMapView}
-        selectedPolygon={selectedPolygon}
+        selectedPolygon={selectedFeature}
       />
 
       <div className="card shadow">

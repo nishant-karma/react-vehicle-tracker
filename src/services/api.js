@@ -1,31 +1,31 @@
 import axios from 'axios';
-import { polygon } from 'leaflet';
 
 const API = axios.create({
   baseURL: 'http://localhost:8080/api',
 });
 
+// Auth
 export const login = (email, password) =>
   API.post('/login', { email, password });
 
-// Add role field to signup
 export const signup = (email, password, role) =>
   API.post('/signup', { email, password, role });
 
-
+// Vehicle APIs
 export const fetchVehiclePath = (vehicleNumber, from, to) =>
-  API.get("/vehicles/path", {
+  API.get('/vehicles/path', {
     params: { vehicleNumber, from, to },
   });
 
+export const fetchLiveVehicles = () => API.get('/vehicles/live');
 
-  export const fetchLiveVehicles = () => API.get("/vehicles/live");
+// Feature APIs (supports Point, LineString, Polygon)
+export const saveFeature = (payload) => API.post('/features/save', payload);
 
-  export const savePolygon = (payload) => API.post("/polygons/save",payload);
+export const getAllFeatures = () => API.get('/features/get');
 
-  export const getAllPolygons = () => API.get("/polygons/get");
+export const editFeature = ({ id, geometry }) =>
+  API.put(`/features/edit/${id}`, { geometry });
 
-  export const editPolygon = ({ id, coordinates }) =>
-    API.put(`/polygons/edit/${id}`, { coordinates });
-
-  export const deletePolygon = () => API.delete(`/polygons/delete/$(id)`);
+export const deleteFeature = (id) =>
+  API.delete(`/features/delete/${id}`);
